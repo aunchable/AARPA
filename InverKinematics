@@ -1,0 +1,13 @@
+(*Inverse Kinematics, this implements a test case to ensure our model is correct.*)
+
+l1 = 1
+l2 = 1
+t5 = 0
+t4 = -h + l3 cos(t5) - l3 + 0
+r = Sqrt[(l3 sin(t5) cos(t1 + t2 + t3) - l2)^2 + (l1 + 
+    l3 sin(t5) sin(t1 + t2 + t3))^2]
+t2 = \[Pi] - cos^-1 ((l1^2 + l2^2 - r^2)/(2 l1 l2))
+t1 = tan^-1(l1 + l3 sin(t5) sin(t1 + t2 + t3), 
+   l3 sin(t5) cos(t1 + t2 + t3) - l2) - 
+  cos^-1 ((l1^2 - l2^2 + r^2)/(2 l1 r))
+t3 = p - t1 - t2
