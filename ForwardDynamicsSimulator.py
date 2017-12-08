@@ -61,7 +61,7 @@ def Js_st(r, theta):
     J[1][1] = r.L1 * s1
     J[1][2] = r.L1 * s1 + r.L2 * s12
     J[1][3] = 0
-    J[1][4] = (r.H + r.L3 + t4) * s123
+    J[1][4] = -(r.H + r.L3 + t4) * s123
 
     J[2][0] = 0
     J[2][1] = 0
@@ -90,36 +90,55 @@ def Js_st(r, theta):
     return J
 
 
+def twist_skewsym(twist):
+    pos_vec = twist[:3]
+    omega_vec = twist[3:]
+    omega_skewsym = np.array([[0,-omega_vec[2],omega_vec[1]],
+                              [omega_vec[2],0,-omega_vec[0]],
+                              [-omega_vec[1],omega_vec[0],0]])
+    skewsym = np.zeros(shape=(4,4))
+    skewsym[:3, :3] = omega_skewsym
+    skewsym[:3, 3] = pos_vec
+    return skewsym
+
+
 def forwards_kinematics_position(robotArm, timeline, delta_t):
     if len(timeline) == 0:
         return [], [], []
 
+    robot_to_canvas = [robotArm.world.ROBOT_BASE_X,
+                       robotArm.world.ROBOT_BASE_Y,
+                       0.0]
+
     t_pos = []
     q1_pos = []
     q2_pos = []
+    timestamps = []
 
     g = g_st(robotArm, timeline[0][1:])
-    t_pos.append(g[:3, 3])
-    q1_pos.append(np.dot(g, robotArm.QB1)[:3])
-    q2_pos.append(np.dot(g, robotArm.QB2)[:3])
+    t_pos.append(g[:3, 3] + robot_to_canvas)
+    q1_pos.append(np.dot(g, robotArm.QB1)[:3] + robot_to_canvas)
+    q2_pos.append(np.dot(g, robotArm.QB2)[:3] + robot_to_canvas)
+    timestamps.append(0.0)
 
     last_t = 0.0
     for timestep in timeline[1:]:
-        if timestep[0] > last_t + delta_t:
+        if timestep[0] >= last_t + delta_t:
             g = g_st(robotArm, timestep[1:])
-            t_pos.append(g[:3, 3])
-            q1_pos.append(np.dot(g, robotArm.QB1)[:3])
-            q2_pos.append(np.dot(g, robotArm.QB2)[:3])
+            t_pos.append(g[:3, 3] + robot_to_canvas)
+            q1_pos.append(np.dot(g, robotArm.QB1)[:3] + robot_to_canvas)
+            q2_pos.append(np.dot(g, robotArm.QB2)[:3] + robot_to_canvas)
+            timestamps.append(timestep[0])
             last_t = timestep[0]
 
+    timestamps = np.asarray(timestamps)
     t_pos = np.asarray(t_pos)
     q1_pos = np.asarray(q1_pos)
     q2_pos = np.asarray(q2_pos)
+    return t_pos, q1_pos, q2_pos, timestamps
 
-    return t_pos, q1_pos, q2_pos
 
-
-def forwards_dynamics_velocities(robotArm, timeline, delta_t):
+def forwards_dynamics_velocities(robotArm, timeline, t_pos, timestamps, delta_t):
     if len(timeline) <= 2:
         return [], [], []
 
@@ -128,15 +147,21 @@ def forwards_dynamics_velocities(robotArm, timeline, delta_t):
     J = Js_st(robotArm, timeline[1][1:])
     dtheta = ((timeline[2][1:] - timeline[0][1:]) /
               (timeline[2][0] - timeline[0][0]))
-    t_vel.append(np.dot(J, dtheta)[:3])
+    Vs_st = np.dot(J, dtheta)
+    idx = np.argmin(np.abs(timestamps-timeline[1][0]))
+    t_pos_ext = np.array([t_pos[idx][0], t_pos[idx][1], t_pos[idx][2], 1.0])
+    t_vel.append(np.dot(twist_skewsym(Vs_st), t_pos_ext)[:3])
 
     last_t = timeline[1][0]
     for i, timestep in enumerate(timeline[:-1]):
-        if timestep[0] > last_t + delta_t:
+        if timestep[0] >= last_t + delta_t:
             J = Js_st(robotArm, timestep[1:])
             dtheta = ((timeline[i+1][1:] - timeline[i-1][1:]) /
                       (timeline[i+1][0] - timeline[i-1][0]))
-            t_vel.append(np.dot(J, dtheta)[:3])
+            Vs_st = np.dot(J, dtheta)
+            idx = np.argmin(np.abs(timestamps-timestep[0]))
+            t_pos_ext = np.array([t_pos[idx][0], t_pos[idx][1], t_pos[idx][2], 1.0])
+            t_vel.append(np.dot(twist_skewsym(Vs_st), t_pos_ext)[:3])
             last_t = timestep[0]
 
     t_vel.append(t_vel[-1])
@@ -165,7 +190,7 @@ def plot_forwards_simulation_results(timeline, t_pos, q1_pos, q2_pos, t_vel):
     plt.plot(timeline[:, 0], timeline[:, 5], 'k-')
     plt.ylabel('Theta 5')
     plt.xlabel('Time (s)')
-    plt.savefig('plots/timeline.png')
+    plt.savefig('plots/timeline4.png')
     plt.close()
 
     # Position plot
@@ -178,13 +203,13 @@ def plot_forwards_simulation_results(timeline, t_pos, q1_pos, q2_pos, t_vel):
     plt.ylim([-100, 100])
     plt.gca().set_aspect('equal', adjustable='box')
     plt.title('Position over time')
-    plt.savefig('plots/position.png')
+    plt.savefig('plots/position4.png')
     plt.close()
 
     # Velocity plot
     plt.figure()
     s = 30
-    Q = plt.quiver(t_pos[:, 0][::s], t_pos[:, 1][::s], t_vel[:, 0][::s], t_vel[:, 1][::s])
+    Q = plt.quiver(t_pos[:, 0][1::s], t_pos[:, 1][1::s], t_vel[:, 0][1::s], t_vel[:, 1][1::s])
     qk = plt.quiverkey(Q, 0.9, 0.9, 1, 'cm/s', labelpos='E', coordinates='figure')
     plt.xlabel('X')
     plt.ylabel('Y')
@@ -192,7 +217,7 @@ def plot_forwards_simulation_results(timeline, t_pos, q1_pos, q2_pos, t_vel):
     plt.ylim([-100, 100])
     plt.gca().set_aspect('equal', adjustable='box')
     plt.title('Linear velocity over time')
-    plt.savefig('plots/velocity.png')
+    plt.savefig('plots/velocity4.png')
     plt.close()
     return
 
@@ -202,9 +227,11 @@ robotArm = RobotWorld.RobotArm(world)
 
 delta_t = 0.01
 simulated_timeline = SimulatedTimelineGenerator.generate_linear_timeline(
-                        robotArm, [True, True, True, False, False])
-t_pos, q1_pos, q2_pos = forwards_kinematics_position(robotArm, simulated_timeline, delta_t)
-t_vel = forwards_dynamics_velocities(robotArm, simulated_timeline, delta_t)
+                        robotArm, [True, True, False, False, False])
+# simulated_timeline = SimulatedTimelineGenerator.generate_piecewise_linear_timeline(
+#                         robotArm, [True, True, True, False, False], time_length=10)
+t_pos, q1_pos, q2_pos, timestamps = forwards_kinematics_position(robotArm, simulated_timeline, delta_t)
+t_vel = forwards_dynamics_velocities(robotArm, simulated_timeline, t_pos, timestamps, delta_t)
 
 print(simulated_timeline[:5])
 print(t_pos[:5])
